@@ -1,0 +1,999 @@
+
+
+<!DOCTYPE html>
+<html lang="zh-CN" data-default-color-scheme=auto>
+
+
+
+<head>
+  <meta charset="UTF-8">
+
+  <link rel="apple-touch-icon" sizes="76x76" href="/img/fluid.png">
+  <link rel="icon" href="/img/fluid.png">
+  
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, shrink-to-fit=no">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  
+  <meta name="theme-color" content="#2f4154">
+  <meta name="author" content="丁一帆">
+  <meta name="keywords" content="">
+  
+    <meta name="description" content="GRPO（Group Relative Policy Optimization）相比 PPO 最显眼的改动，就是去掉了 Critic Model（价值网络）。这一简化让训练流程干净了很多，但也带来了一系列不容忽视的问题。本文系统梳理这些问题，以及后续是如何应对的。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="GRPO 去掉 Critic Model 会带来哪些问题？">
+<meta property="og:url" content="https://kissshhot.github.io/2026/01/22/grpo-no-critic-problems/index.html">
+<meta property="og:site_name" content="DYcoder">
+<meta property="og:description" content="GRPO（Group Relative Policy Optimization）相比 PPO 最显眼的改动，就是去掉了 Critic Model（价值网络）。这一简化让训练流程干净了很多，但也带来了一系列不容忽视的问题。本文系统梳理这些问题，以及后续是如何应对的。">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2026-01-22T00:00:00.000Z">
+<meta property="article:modified_time" content="2026-04-14T12:38:13.652Z">
+<meta property="article:author" content="丁一帆">
+<meta property="article:tag" content="LLM">
+<meta property="article:tag" content="强化学习">
+<meta property="article:tag" content="GRPO">
+<meta property="article:tag" content="PPO">
+<meta property="article:tag" content="RLHF">
+<meta name="twitter:card" content="summary_large_image">
+  
+  
+  
+  <title>GRPO 去掉 Critic Model 会带来哪些问题？ - DYcoder</title>
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/twitter-bootstrap/4.6.1/css/bootstrap.min.css" />
+
+
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/github-markdown-css/4.0.0/github-markdown.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/hint.css/2.7.0/hint.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.css" />
+
+
+
+<!-- 主题依赖的图标库，不要自行修改 -->
+<!-- Do not modify the link that theme dependent icons -->
+
+<link rel="stylesheet" href="//at.alicdn.com/t/c/font_1749284_5i9bdhy70f8.css">
+
+
+
+<link rel="stylesheet" href="//at.alicdn.com/t/c/font_1736178_k526ubmyhba.css">
+
+
+<link  rel="stylesheet" href="/css/main.css" />
+
+
+  <link id="highlight-css" rel="stylesheet" href="/css/highlight.css" />
+  
+    <link id="highlight-css-dark" rel="stylesheet" href="/css/highlight-dark.css" />
+  
+
+
+
+
+  <script id="fluid-configs">
+    var Fluid = window.Fluid || {};
+    Fluid.ctx = Object.assign({}, Fluid.ctx)
+    var CONFIG = {"hostname":"kissshhot.github.io","root":"/","version":"1.9.9","typing":{"enable":true,"typeSpeed":70,"cursorChar":"_","loop":false,"scope":[]},"anchorjs":{"enable":true,"element":"h1,h2,h3,h4,h5,h6","placement":"left","visible":"hover","icon":""},"progressbar":{"enable":true,"height_px":3,"color":"#29d","options":{"showSpinner":false,"trickleSpeed":100}},"code_language":{"enable":true,"default":"TEXT"},"copy_btn":true,"image_caption":{"enable":true},"image_zoom":{"enable":true,"img_url_replace":["",""]},"toc":{"enable":true,"expand_all":true,"placement":"right","headingSelector":"h1,h2,h3,h4,h5,h6","collapseDepth":0},"lazyload":{"enable":true,"loading_img":"/img/loading.gif","onlypost":false,"offset_factor":2},"web_analytics":{"enable":false,"follow_dnt":true,"baidu":null,"google":{"measurement_id":null},"tencent":{"sid":null,"cid":null},"leancloud":{"app_id":null,"app_key":null,"server_url":null,"path":"window.location.pathname","ignore_local":false},"openkounter":{"server_url":"https://open-kounter.mintimate.cn","path":"window.location.pathname","ignore_local":false},"umami":{"src":null,"website_id":null,"domains":null,"start_time":"2024-01-01T00:00:00.000Z","token":null,"api_server":null}},"search_path":"/local-search.xml","include_content_in_search":true};
+
+    if (CONFIG.web_analytics.follow_dnt) {
+      var dntVal = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+      Fluid.ctx.dnt = dntVal && (dntVal.startsWith('1') || dntVal.startsWith('yes') || dntVal.startsWith('on'));
+    }
+  </script>
+  <script  src="/js/utils.js" ></script>
+  <script  src="/js/color-schema.js" ></script>
+  
+
+
+  
+<meta name="generator" content="Hexo 7.3.0"></head>
+
+
+<body>
+  
+
+  <header>
+    
+
+<div class="header-inner" style="height: 70vh;">
+  <nav id="navbar" class="navbar fixed-top  navbar-expand-lg navbar-dark scrolling-navbar">
+  <div class="container">
+    <a class="navbar-brand" href="/">
+      <strong>DYcoder</strong>
+    </a>
+
+    <button id="navbar-toggler-btn" class="navbar-toggler" type="button" data-toggle="collapse"
+            data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+      <div class="animated-icon"><span></span><span></span><span></span></div>
+    </button>
+
+    <!-- Collapsible content (desktop) -->
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+      <ul class="navbar-nav ml-auto text-center">
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/" target="_self">
+                <i class="iconfont icon-home-fill"></i>
+                <span>首页</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/archives/" target="_self">
+                <i class="iconfont icon-archive-fill"></i>
+                <span>归档</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/categories/" target="_self">
+                <i class="iconfont icon-category-fill"></i>
+                <span>分类</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/tags/" target="_self">
+                <i class="iconfont icon-tags-fill"></i>
+                <span>标签</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/about/" target="_self">
+                <i class="iconfont icon-user-fill"></i>
+                <span>关于</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/leetcode/" target="_self">
+                <i class="iconfont icon-code-fill"></i>
+                <span>LeetCode</span>
+              </a>
+            </li>
+          
+        
+        
+          <li class="nav-item" id="search-btn">
+            <a class="nav-link" target="_self" href="javascript:;" data-toggle="modal" data-target="#modalSearch" aria-label="Search">
+              <i class="iconfont icon-search"></i>
+            </a>
+          </li>
+          
+        
+        
+          <li class="nav-item" id="color-toggle-btn">
+            <a class="nav-link" target="_self" href="javascript:;" aria-label="Color Toggle">
+              <i class="iconfont icon-dark" id="color-toggle-icon"></i>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- Mobile grid menu overlay -->
+<div id="mobile-grid-menu" class="d-lg-none">
+  <div class="mobile-grid-menu-inner">
+    <div class="container">
+      <div class="row">
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-home-fill"></i>
+                  <span>首页</span>
+                </div>
+              </a>
+            </div>
+          
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/archives/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-archive-fill"></i>
+                  <span>归档</span>
+                </div>
+              </a>
+            </div>
+          
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/categories/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-category-fill"></i>
+                  <span>分类</span>
+                </div>
+              </a>
+            </div>
+          
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/tags/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-tags-fill"></i>
+                  <span>标签</span>
+                </div>
+              </a>
+            </div>
+          
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/about/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-user-fill"></i>
+                  <span>关于</span>
+                </div>
+              </a>
+            </div>
+          
+        
+          
+          
+          
+          
+            <div class="col-4 mobile-grid-cell">
+              <a href="/leetcode/" target="_self">
+                <div class="mobile-grid-item">
+                  <i class="iconfont icon-code-fill"></i>
+                  <span>LeetCode</span>
+                </div>
+              </a>
+            </div>
+          
+        
+        
+          <div class="col-4 mobile-grid-cell" id="mobile-search-btn">
+            <a href="javascript:;" data-toggle="modal" data-target="#modalSearch" aria-label="Search">
+              <div class="mobile-grid-item">
+                <i class="iconfont icon-search"></i>
+                <span>搜索</span>
+              </div>
+            </a>
+          </div>
+        
+        
+          <div class="col-4 mobile-grid-cell" id="mobile-color-toggle-btn"
+               data-label-light="开灯"
+               data-label-dark="关灯">
+            <a href="javascript:;" aria-label="Color Toggle">
+              <div class="mobile-grid-item">
+                <i class="iconfont icon-dark" id="mobile-color-toggle-icon"></i>
+                <span id="mobile-color-toggle-label">关灯</span>
+              </div>
+            </a>
+          </div>
+        
+      </div>
+    </div>
+  </div>
+</div>
+
+  
+
+<div id="banner" class="banner" parallax=true
+     style="background: url('/img/default.png') no-repeat center center; background-size: cover;">
+  <div class="full-bg-img">
+    <div class="mask flex-center" style="background-color: rgba(0, 0, 0, 0.3)">
+      <div class="banner-text text-center fade-in-up">
+        <div class="h2">
+          
+            <span id="subtitle" data-typed-text="GRPO 去掉 Critic Model 会带来哪些问题？"></span>
+          
+        </div>
+
+        
+          
+  <div class="mt-3">
+    
+    
+      <span class="post-meta">
+        <i class="iconfont icon-date-fill" aria-hidden="true"></i>
+        <time datetime="2026-01-22 00:00" pubdate>
+          2026年1月22日 凌晨
+        </time>
+      </span>
+    
+  </div>
+
+  <div class="mt-1">
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-chart"></i>
+        
+          2.6k 字
+        
+      </span>
+    
+
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-clock-fill"></i>
+        
+        
+        
+          23 分钟
+        
+      </span>
+    
+
+    
+    
+  </div>
+
+
+        
+      </div>
+
+      
+    </div>
+  </div>
+</div>
+
+
+
+</div>
+
+  </header>
+
+  <main>
+    
+      
+
+<div class="container-fluid nopadding-x">
+  <div class="row nomargin-x">
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+
+    </div>
+
+    <div class="col-lg-8 nopadding-x-md">
+      <div class="container nopadding-x-md" id="board-ctn">
+        <div id="board">
+          <article class="post-content mx-auto">
+            <h1 id="seo-header">GRPO 去掉 Critic Model 会带来哪些问题？</h1>
+            
+            
+              <div class="markdown-body">
+                
+                <p>GRPO（Group Relative Policy Optimization）相比 PPO 最显眼的改动，就是<strong>去掉了 Critic Model（价值网络）</strong>。这一简化让训练流程干净了很多，但也带来了一系列不容忽视的问题。本文系统梳理这些问题，以及后续是如何应对的。</p>
+<span id="more"></span>
+
+<hr>
+<h2 id="先回顾：PPO-的-Critic-Model-是干什么的？"><a href="#先回顾：PPO-的-Critic-Model-是干什么的？" class="headerlink" title="先回顾：PPO 的 Critic Model 是干什么的？"></a>先回顾：PPO 的 Critic Model 是干什么的？</h2><p>在 PPO 中，Critic（价值模型，Value Model）的职责是**估计当前状态的期望回报 $V(s)$**。它的核心作用体现在两处：</p>
+<ol>
+<li><p><strong>计算优势函数（Advantage）</strong></p>
+<p>$$A_t &#x3D; R_t - V(s_t)$$</p>
+<p>直接用原始奖励 $R_t$ 作为学习信号，方差极大。Critic 提供的 $V(s_t)$ 充当基线（baseline），将奖励”对齐到期望水平”，有效压低方差，让策略梯度信号更稳定。</p>
+</li>
+<li><p><strong>GAE（Generalized Advantage Estimation）</strong></p>
+<p>PPO 通常配合 GAE 使用，通过 $\lambda$-折扣把多步奖励平滑整合成单步优势估计，进一步降低方差、减少偏差。</p>
+</li>
+</ol>
+<hr>
+<h2 id="GRPO-怎么去掉-Critic-的？"><a href="#GRPO-怎么去掉-Critic-的？" class="headerlink" title="GRPO 怎么去掉 Critic 的？"></a>GRPO 怎么去掉 Critic 的？</h2><p>GRPO 的做法是<strong>用组内相对排名代替价值基线</strong>：</p>
+<p>对同一个问题 $q$，采样 $G$ 条输出 ${o_1, o_2, \ldots, o_G}$，分别打分得 ${r_1, r_2, \ldots, r_G}$，然后在组内做归一化：</p>
+<p>$$\hat{A}_i &#x3D; \frac{r_i - \text{mean}(\mathbf{r})}{\text{std}(\mathbf{r})}$$</p>
+<p>以此作为每条输出的优势估计，完全不需要独立的价值网络。</p>
+<p>这个想法直觉上很合理：<strong>同一道题的多条回答互为参照，相对好坏就是学习信号</strong>。但”去掉 Critic”的代价，正藏在这个公式背后。</p>
+<hr>
+<h2 id="去掉-Critic-带来的问题"><a href="#去掉-Critic-带来的问题" class="headerlink" title="去掉 Critic 带来的问题"></a>去掉 Critic 带来的问题</h2><h3 id="1-优势估计方差大"><a href="#1-优势估计方差大" class="headerlink" title="1. 优势估计方差大"></a>1. 优势估计方差大</h3><p>Critic 的核心价值之一是<strong>降低方差</strong>。没有价值网络，GRPO 的优势估计完全依赖有限的 $G$ 个样本统计量（均值和方差），这是一个高方差估计量。</p>
+<p>当 $G$ 较小（如 4 或 8）时，组内均值可能与真实期望相差甚远，优势信号噪声大，导致：</p>
+<ul>
+<li>策略梯度更新方向不稳定</li>
+<li>需要更小的学习率来补偿，训练变慢</li>
+</ul>
+<p>而 PPO 的 Critic 是一个单独的神经网络，可以在海量数据上拟合出相对准确的 $V(s)$，基线质量显著更高。</p>
+<hr>
+<h3 id="2-训练信号稀疏：难题与全对-全错问题"><a href="#2-训练信号稀疏：难题与全对-全错问题" class="headerlink" title="2. 训练信号稀疏：难题与全对&#x2F;全错问题"></a>2. 训练信号稀疏：难题与全对&#x2F;全错问题</h3><p>GRPO 的学习信号依赖组内的<strong>分差</strong>。一旦所有样本都对或都错，组内标准差趋于零，优势估计接近全零——<strong>梯度消失，模型停止学习</strong>。</p>
+<p>这在两种场景下高发：</p>
+<ul>
+<li><strong>过于简单的题</strong>：模型已经学会，$G$ 条输出全部正确，奖励全为 1，标准差为 0。</li>
+<li><strong>过于困难的题</strong>：模型完全不会，$G$ 条输出全部错误，奖励全为 0，标准差为 0。</li>
+</ul>
+<p>这个问题被称为 <strong>“无效样本”</strong> 或 **”训练信号塌缩”**。PPO 的 Critic 则不受此限制——即使所有输出奖励相同，价值网络估计的 $V(s)$ 也可以提供非零的优势信号（通过时序差分 TD 误差）。</p>
+<blockquote>
+<p><strong>DAPO</strong> 的动态采样（Dynamic Sampling）策略正是针对此问题提出的：过滤掉全对或全错的样本，只用有信息量的样本参与更新。</p>
+</blockquote>
+<hr>
+<h3 id="3-信用分配困难（Credit-Assignment）"><a href="#3-信用分配困难（Credit-Assignment）" class="headerlink" title="3. 信用分配困难（Credit Assignment）"></a>3. 信用分配困难（Credit Assignment）</h3><p>LLM 的输出是一个长序列（几十到几百 token）。整个序列只有一个最终奖励时，<strong>哪个 token 的生成对结果好坏负责？</strong> 这就是信用分配问题。</p>
+<p>PPO 通过 Critic 估计每一步的 $V(s_t)$，可以沿时间步推算每个 token 位置的优势，提供细粒度的 token 级学习信号。</p>
+<p>GRPO 的组内归一化只给出<strong>序列级别的优势</strong>，然后将其均匀广播到序列中的每个 token。这等价于假设”所有 token 对最终奖励的贡献相等”，显然是错误的：</p>
+<ul>
+<li>无效的 filler token 和关键推理步骤被同等对待</li>
+<li>模型无法精确知道哪一步推理出了问题</li>
+<li>长序列中的早期 token 信号更加稀疏</li>
+</ul>
+<hr>
+<h3 id="4-分布偏移（Distribution-Shift）加剧"><a href="#4-分布偏移（Distribution-Shift）加剧" class="headerlink" title="4. 分布偏移（Distribution Shift）加剧"></a>4. 分布偏移（Distribution Shift）加剧</h3><p>PPO 训练中，Critic 可以在每次 rollout 后通过 TD 学习快速更新对当前策略分布的估计，从而提供 <strong>在线（on-policy）的价值基线</strong>。</p>
+<p>GRPO 没有这个自适应机制，当策略快速变化时，组内均值&#x2F;方差可能滞后于真实奖励分布，导致优势估计出现系统性偏差。这在策略更新步数较多（即 off-policy 程度较高）时尤为明显。</p>
+<hr>
+<h3 id="5-熵塌缩（Entropy-Collapse）"><a href="#5-熵塌缩（Entropy-Collapse）" class="headerlink" title="5. 熵塌缩（Entropy Collapse）"></a>5. 熵塌缩（Entropy Collapse）</h3><p>没有 Critic 提供的价值约束，策略可能过早收敛到低熵的确定性输出（即总生成同一类回答）。这会进一步压缩组内样本多样性，陷入恶性循环：</p>
+<ul>
+<li>多样性低 → 组内奖励方差小 → 学习信号弱 → 策略停止探索 → 多样性更低</li>
+</ul>
+<p>PPO 通常配合熵正则项和 Critic 一同控制策略的探索-利用平衡；GRPO 则需要额外的机制（如 DAPO 的 clip-higher、token 级 KL 约束）来对抗这一倾向。</p>
+<hr>
+<h3 id="6-内存与计算并未显著节省"><a href="#6-内存与计算并未显著节省" class="headerlink" title="6. 内存与计算并未显著节省"></a>6. 内存与计算并未显著节省</h3><p>去掉 Critic 看似节省了一个模型的显存，但 GRPO 需要对每道题采样 $G$（通常 8～16）条输出，<strong>总计算量和内存峰值往往并不低于 PPO</strong>。更糟的是，$G$ 越大，以上所有问题都能有所缓解（更准确的统计量），但代价是 $G$ 倍的推理成本。</p>
+<p>这意味着 GRPO 实际上在用<strong>更多的推理开销</strong>换取<strong>免于维护价值网络</strong>的便利，性价比不如直觉上的高。</p>
+<hr>
+<h2 id="后续工作如何应对"><a href="#后续工作如何应对" class="headerlink" title="后续工作如何应对"></a>后续工作如何应对</h2><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>代表性解法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>训练信号稀疏 &#x2F; 全对全错</td>
+<td>DAPO 的动态采样（过滤无效组）</td>
+</tr>
+<tr>
+<td>高方差梯度</td>
+<td>DAPO 的 clip-higher + token 级 KL</td>
+</tr>
+<tr>
+<td>信用分配</td>
+<td>Dr. GRPO 的去偏（debiased）优势估计</td>
+</tr>
+<tr>
+<td>优势估计偏差</td>
+<td>GSPO 用序列级 KL 替代 token 级约束</td>
+</tr>
+<tr>
+<td>熵塌缩</td>
+<td>熵正则 &#x2F; 温度退火 &#x2F; 多样性采样策略</td>
+</tr>
+</tbody></table>
+<p>其中 <strong>Dr. GRPO</strong>（Unbiased Group Relative Policy Optimization，2025）从统计角度指出 GRPO 原始优势估计存在系统性偏差（bias），并推导出无偏版本；<strong>GSPO</strong> 则从目标函数层面重新设计，直接用序列级 KL 约束替代 PPO-clip，规避了部分信用分配问题。</p>
+<hr>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>GRPO 去掉 Critic 是一个工程上的大胆简化，让 RL 训练流程更容易落地，也确实推动了以 DeepSeek-R1 为代表的一批成果。但这个简化并非没有代价：</p>
+<blockquote>
+<p><strong>高方差、信号稀疏、信用分配不精确、分布偏移、熵塌缩</strong>，这五个问题本质上都是同一件事的不同侧面——<strong>用粗粒度的组内统计代替细粒度的价值估计，必然丢失信息</strong>。</p>
+</blockquote>
+<p>理解这些问题，才能看懂后续 DAPO、GSPO、Dr. GRPO 等工作的动机和取舍，也能在自己的训练实践中更有针对性地调参和设计奖励。</p>
+
+                
+              </div>
+            
+            <hr/>
+            <div>
+              <div class="post-metas my-3">
+  
+    <div class="post-meta mr-3 d-flex align-items-center">
+      <i class="iconfont icon-category"></i>
+      
+
+<span class="category-chains">
+  
+  
+    
+      <span class="category-chain">
+        
+  <a href="/categories/%E6%8A%80%E6%9C%AF%E7%AC%94%E8%AE%B0/" class="category-chain-item">技术笔记</a>
+  
+  
+
+      </span>
+    
+  
+</span>
+
+    </div>
+  
+  
+    <div class="post-meta">
+      <i class="iconfont icon-tags"></i>
+      
+        <a href="/tags/LLM/" class="print-no-link">#LLM</a>
+      
+        <a href="/tags/%E5%BC%BA%E5%8C%96%E5%AD%A6%E4%B9%A0/" class="print-no-link">#强化学习</a>
+      
+        <a href="/tags/GRPO/" class="print-no-link">#GRPO</a>
+      
+        <a href="/tags/PPO/" class="print-no-link">#PPO</a>
+      
+        <a href="/tags/RLHF/" class="print-no-link">#RLHF</a>
+      
+    </div>
+  
+</div>
+
+
+              
+  
+
+  <div class="license-box my-3">
+    <div class="license-title">
+      <div>GRPO 去掉 Critic Model 会带来哪些问题？</div>
+      <div>https://kissshhot.github.io/2026/01/22/grpo-no-critic-problems/</div>
+    </div>
+    <div class="license-meta">
+      
+        <div class="license-meta-item">
+          <div>作者</div>
+          <div>丁一帆</div>
+        </div>
+      
+      
+        <div class="license-meta-item license-meta-date">
+          <div>发布于</div>
+          <div>2026年1月22日</div>
+        </div>
+      
+      
+      
+        <div class="license-meta-item">
+          <div>许可协议</div>
+          <div>
+            
+              
+              
+                <a class="print-no-link" target="_blank" href="https://creativecommons.org/licenses/by/4.0/">
+                  <span class="hint--top hint--rounded" aria-label="BY - 署名">
+                    <i class="iconfont icon-cc-by"></i>
+                  </span>
+                </a>
+              
+            
+          </div>
+        </div>
+      
+    </div>
+    <div class="license-icon iconfont"></div>
+  </div>
+
+
+
+              
+                <div class="post-prevnext my-3">
+                  <article class="post-prev col-6">
+                    
+                    
+                      <a href="/2026/02/08/claude-code-china-guide/" title="Claude Code 国内使用指南">
+                        <i class="iconfont icon-arrowleft"></i>
+                        <span class="hidden-mobile">Claude Code 国内使用指南</span>
+                        <span class="visible-mobile">上一篇</span>
+                      </a>
+                    
+                  </article>
+                  <article class="post-next col-6">
+                    
+                    
+                      <a href="/2026/01/20/dapo-gspo-rl-explained/" title="DAPO 与 GSPO 相对于 GRPO 的改进">
+                        <span class="hidden-mobile">DAPO 与 GSPO 相对于 GRPO 的改进</span>
+                        <span class="visible-mobile">下一篇</span>
+                        <i class="iconfont icon-arrowright"></i>
+                      </a>
+                    
+                  </article>
+                </div>
+              
+            </div>
+
+            
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+  <aside class="sidebar" style="margin-left: -1rem">
+    <div id="toc">
+  <p class="toc-header">
+    <i class="iconfont icon-list"></i>
+    <span>目录</span>
+  </p>
+  <div class="toc-body" id="toc-body"></div>
+</div>
+
+
+
+  </aside>
+
+
+    </div>
+  </div>
+</div>
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+  
+  
+
+
+
+
+
+
+
+
+
+    
+
+    
+      <a id="scroll-top-button" aria-label="TOP" href="#" role="button">
+        <i class="iconfont icon-arrowup" aria-hidden="true"></i>
+      </a>
+    
+
+    
+      <div class="modal fade" id="modalSearch" tabindex="-1" role="dialog" aria-labelledby="ModalLabel"
+     aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header text-center">
+        <h4 class="modal-title w-100 font-weight-bold">搜索</h4>
+        <button type="button" id="local-search-close" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body mx-3">
+        <div class="md-form mb-5">
+          <input type="text" id="local-search-input" class="form-control validate">
+          <label data-error="x" data-success="v" for="local-search-input">关键词</label>
+        </div>
+        <div class="list-group" id="local-search-result"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    
+
+    
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+  
+    <div class="footer-content">
+       <a href="https://hexo.io" target="_blank" rel="nofollow noopener"><span>Hexo</span></a> <i class="iconfont icon-love"></i> <a href="https://github.com/fluid-dev/hexo-theme-fluid" target="_blank" rel="nofollow noopener"><span>Fluid</span></a> 
+    </div>
+  
+  
+  
+</div>
+
+  </footer>
+
+  <!-- Scripts -->
+  
+  <script  src="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.js" ></script>
+  <link  rel="stylesheet" href="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.css" />
+
+  <script>
+    NProgress.configure({"showSpinner":false,"trickleSpeed":100})
+    NProgress.start()
+    window.addEventListener('load', function() {
+      NProgress.done();
+    })
+  </script>
+
+
+<script  src="https://lib.baomitu.com/jquery/3.6.4/jquery.min.js" ></script>
+<script  src="https://lib.baomitu.com/twitter-bootstrap/4.6.1/js/bootstrap.min.js" ></script>
+<script  src="/js/events.js" ></script>
+<script  src="/js/plugins.js" ></script>
+
+
+  <script  src="https://lib.baomitu.com/typed.js/2.0.12/typed.min.js" ></script>
+  <script>
+    (function (window, document) {
+      var typing = Fluid.plugins.typing;
+      var subtitle = document.getElementById('subtitle');
+      if (!subtitle || !typing) {
+        return;
+      }
+      var text = subtitle.getAttribute('data-typed-text');
+      
+        typing(text);
+      
+    })(window, document);
+  </script>
+
+
+
+
+  
+    <script  src="/js/img-lazyload.js" ></script>
+  
+
+
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/tocbot/4.20.1/tocbot.min.js', function() {
+    var toc = jQuery('#toc');
+    if (toc.length === 0 || !window.tocbot) { return; }
+    var boardCtn = jQuery('#board-ctn');
+    var boardTop = boardCtn.offset().top;
+
+    function isExpandAllEnabled() {
+      return CONFIG.toc && CONFIG.toc.expand_all === true;
+    }
+    function expandAllToc() {
+      if (!isExpandAllEnabled()) { return; }
+      jQuery('#toc-body .tocbot-is-collapsed').removeClass('tocbot-is-collapsed');
+    }
+    function updateTocToggle($li, $childList) {
+      var $toggle = $li.children('.toc-toggle');
+      if ($toggle.length === 0) { return; }
+      var collapsed = $childList.hasClass('tocbot-is-collapsed');
+      $toggle
+        .toggleClass('toc-toggle-collapsed', collapsed)
+        .toggleClass('toc-toggle-expanded', !collapsed);
+    }
+    function bindTocToggle() {
+      if (!isExpandAllEnabled()) { return; }
+      jQuery('#toc-body .toc-list-item').each(function() {
+        var $li = jQuery(this);
+        var $childList = $li.children('ol');
+        if ($childList.length === 0) {
+          if ($li.children('.toc-toggle').length === 0) {
+            $li.prepend('<span class="toc-toggle toc-toggle-placeholder" aria-hidden="true">›</span>');
+          }
+          return;
+        }
+
+        if ($li.children('.toc-toggle').length === 0) {
+          $li.prepend('<span class="toc-toggle toc-toggle-expanded" aria-hidden="true">›</span>');
+        }
+        updateTocToggle($li, $childList);
+      });
+      jQuery('#toc-body').off('click.tocToggle').on('click.tocToggle', '.toc-toggle', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $li = jQuery(this).parent('.toc-list-item');
+        var $childList = $li.children('ol');
+        if ($childList.length === 0) { return; }
+        $childList.toggleClass('tocbot-is-collapsed');
+        updateTocToggle($li, $childList);
+      });
+      if (!window.__tocToggleObserver) {
+        window.__tocToggleObserver = new MutationObserver(function(mutations) {
+          mutations.forEach(function(mutation) {
+            if (mutation.type !== 'attributes' || mutation.attributeName !== 'class') { return; }
+            var $list = jQuery(mutation.target);
+            var $li = $list.parent('.toc-list-item');
+            if ($li.length === 0) { return; }
+            updateTocToggle($li, $list);
+          });
+        });
+        jQuery('#toc-body ol').each(function() {
+          window.__tocToggleObserver.observe(this, { attributes: true });
+        });
+      }
+    }
+    var tocConfig = Object.assign({
+      tocSelector     : '#toc-body',
+      contentSelector : '.markdown-body',
+      linkClass       : 'tocbot-link',
+      activeLinkClass : 'tocbot-active-link',
+      listClass       : 'tocbot-list',
+      isCollapsedClass: 'tocbot-is-collapsed',
+      collapsibleClass: 'tocbot-is-collapsible',
+      scrollSmooth    : true,
+      includeTitleTags: true,
+      headingsOffset  : -boardTop,
+    }, CONFIG.toc);
+    if (isExpandAllEnabled()) {
+      tocConfig.collapseDepth = 6;
+    }
+    window.tocbot.init(tocConfig);
+    if (toc.find('.toc-list-item').length > 0) {
+      toc.css('visibility', 'visible');
+    }
+    expandAllToc();
+    bindTocToggle();
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('tocbot' in window) {
+        tocbot.refresh();
+        var toc = jQuery('#toc');
+        if (toc.length === 0 || !tocbot) {
+          return;
+        }
+        if (toc.find('.toc-list-item').length > 0) {
+          toc.css('visibility', 'visible');
+        }
+        expandAllToc();
+        bindTocToggle();
+      }
+    });
+  });
+</script>
+
+
+  <script src=https://lib.baomitu.com/clipboard.js/2.0.11/clipboard.min.js></script>
+
+  <script>Fluid.plugins.codeWidget();</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/anchor-js/5.0.0/anchor.min.js', function() {
+    window.anchors.options = {
+      placement: CONFIG.anchorjs.placement,
+      visible  : CONFIG.anchorjs.visible
+    };
+    if (CONFIG.anchorjs.icon) {
+      window.anchors.options.icon = CONFIG.anchorjs.icon;
+    }
+    var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+    var res = [];
+    for (var item of el) {
+      res.push('.markdown-body > ' + item.trim());
+    }
+    if (CONFIG.anchorjs.placement === 'left') {
+      window.anchors.options.class = 'anchorjs-link-left';
+    }
+    window.anchors.add(res.join(', '));
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('anchors' in window) {
+        anchors.removeAll();
+        var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+        var res = [];
+        for (var item of el) {
+          res.push('.markdown-body > ' + item.trim());
+        }
+        if (CONFIG.anchorjs.placement === 'left') {
+          anchors.options.class = 'anchorjs-link-left';
+        }
+        anchors.add(res.join(', '));
+      }
+    });
+  });
+</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.js', function() {
+    Fluid.plugins.fancyBox();
+  });
+</script>
+
+
+  <script>Fluid.plugins.imageCaption();</script>
+
+  
+      <script>
+        if (!window.MathJax) {
+          window.MathJax = {
+            tex    : {
+              inlineMath: { '[+]': [['$', '$']] }
+            },
+            loader : {
+              load: ['ui/lazy']
+            },
+            options: {
+              renderActions: {
+                insertedScript: [200, () => {
+                  document.querySelectorAll('mjx-container').forEach(node => {
+                    let target = node.parentNode;
+                    if (target.nodeName.toLowerCase() === 'li') {
+                      target.parentNode.classList.add('has-jax');
+                    }
+                  });
+                }, '', false]
+              }
+            }
+          };
+        } else {
+          MathJax.startup.document.state(0);
+          MathJax.texReset();
+          MathJax.typeset();
+          MathJax.typesetPromise();
+        }
+
+        Fluid.events.registerRefreshCallback(function() {
+          if ('MathJax' in window && MathJax.startup.document && typeof MathJax.startup.document.state === 'function') {
+            MathJax.startup.document.state(0);
+            MathJax.texReset();
+            MathJax.typeset();
+            MathJax.typesetPromise();
+          }
+        });
+      </script>
+    
+
+  <script  src="https://lib.baomitu.com/mathjax/3.2.2/es5/tex-mml-chtml.js" ></script>
+
+  <script  src="/js/local-search.js" ></script>
+
+
+
+
+
+<!-- 主题的启动项，将它保持在最底部 -->
+<!-- the boot of the theme, keep it at the bottom -->
+<script  src="/js/boot.js" ></script>
+
+
+  
+
+  <noscript>
+    <div class="noscript-warning">博客在允许 JavaScript 运行的环境下浏览效果更佳</div>
+  </noscript>
+</body>
+</html>
